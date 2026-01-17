@@ -178,14 +178,22 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
     
     const makeRequest = async () => {
       try {
+        // 设置请求头
+        const headers = {
+          'User-Agent': config.userAgent
+        };
+        
+        // 为豆瓣图片设置特定的 Referer 以绕过防盗链
+        if (targetUrl.includes('doubanio.com') || targetUrl.includes('douban.com')) {
+          headers['Referer'] = 'https://movie.douban.com/';
+        }
+        
         return await axios({
           method: 'get',
           url: targetUrl,
           responseType: 'stream',
           timeout: config.timeout,
-          headers: {
-            'User-Agent': config.userAgent
-          }
+          headers: headers
         });
       } catch (error) {
         if (retries < maxRetries) {
