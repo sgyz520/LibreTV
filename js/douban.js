@@ -344,11 +344,11 @@ function renderDoubanTags(tags) {
         
         // 当前选中的标签使用高亮样式
         if (tag === doubanCurrentTag) {
-            btnClass += 'bg-pink-600 text-white shadow-md border-white';
+            btnClass += 'bg-pink-600 text-white shadow-[0_2px_8px_rgba(236,72,153,0.3)] border-[#ec4899] scale-105';
         } else {
-            btnClass += 'bg-[#1a1a1a] text-gray-300 hover:bg-pink-700 hover:text-white border-[#333] hover:border-white';
+            btnClass += 'bg-[#1a1a1a] text-gray-300 hover:bg-pink-700 hover:text-white border-[#2a2a2a] hover:border-[#ec4899] hover:shadow-[0_2px_6px_rgba(236,72,153,0.2)]';
         }
-        
+
         btn.className = btnClass;
         btn.textContent = tag;
         
@@ -411,17 +411,22 @@ function renderRecommend(tag, pageLimit, pageStart) {
     const container = document.getElementById("douban-results");
     if (!container) return;
 
-    const loadingOverlayHTML = `
-        <div class="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-10">
-            <div class="flex items-center justify-center">
-                <div class="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin inline-block"></div>
-                <span class="text-pink-500 ml-4">加载中...</span>
+    // 移除旧的加载覆盖层
+    container.innerHTML = '';
+    
+    // 创建骨架屏加载效果
+    const skeletonCount = doubanPageSize;
+    const skeletonHTML = Array.from({ length: skeletonCount }, () => `
+        <div class="bg-[#151515] rounded-xl overflow-hidden flex flex-col border border-[#252525] animate-pulse">
+            <div class="w-full aspect-[2/3] bg-[#222] animate-pulse"></div>
+            <div class="p-2">
+                <div class="h-5 bg-[#222] rounded w-3/4 animate-pulse mb-2"></div>
+                <div class="h-4 bg-[#222] rounded w-1/3 animate-pulse"></div>
             </div>
         </div>
-    `;
-
-    container.classList.add("relative");
-    container.insertAdjacentHTML('beforeend', loadingOverlayHTML);
+    `).join('');
+    
+    container.insertAdjacentHTML('beforeend', skeletonHTML);
     
     const target = `https://movie.douban.com/j/search_subjects?type=${doubanMovieTvCurrentSwitch}&tag=${tag}&sort=recommend&page_limit=${pageLimit}&page_start=${pageStart}`;
     
@@ -433,9 +438,14 @@ function renderRecommend(tag, pageLimit, pageStart) {
         .catch(error => {
             console.error("获取豆瓣数据失败：", error);
             container.innerHTML = `
-                <div class="col-span-full text-center py-8">
-                    <div class="text-red-400">❌ 获取豆瓣数据失败，请稍后重试</div>
-                    <div class="text-gray-500 text-sm mt-2">提示：使用VPN可能有助于解决此问题</div>
+                <div class="col-span-full text-center py-12">
+                    <div class="text-red-400 text-4xl mb-4">❌</div>
+                    <div class="text-red-400 text-lg mb-2">获取豆瓣数据失败</div>
+                    <div class="text-gray-500 text-sm mb-6">提示：使用VPN可能有助于解决此问题</div>
+                    <button onclick="renderRecommend(doubanCurrentTag, doubanPageSize, doubanPageStart)" 
+                            class="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors">
+                        🔄 重新加载
+                    </button>
                 </div>
             `;
         });
@@ -506,17 +516,23 @@ function renderDoubanCards(data, container) {
     
     // 如果没有数据
     if (!data.subjects || data.subjects.length === 0) {
-        const emptyEl = document.createElement("div");
-        emptyEl.className = "col-span-full text-center py-8";
-        emptyEl.innerHTML = `
-            <div class="text-pink-500">❌ 暂无数据，请尝试其他分类或刷新</div>
-        `;
-        fragment.appendChild(emptyEl);
-    } else {
+            const emptyEl = document.createElement("div");
+            emptyEl.className = "col-span-full text-center py-12";
+            emptyEl.innerHTML = `
+                <div class="text-gray-400 text-4xl mb-4">🔍</div>
+                <div class="text-gray-400 text-lg mb-2">暂无相关内容</div>
+                <div class="text-gray-500 text-sm mb-6">试试其他分类或者点击"换一批"按钮</div>
+                <button onclick="setupDoubanRefreshBtn(); document.getElementById('douban-refresh').click();" 
+                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">
+                    🔄 换一批
+                </button>
+            `;
+            fragment.appendChild(emptyEl);
+        } else {
         // 循环创建每个影视卡片
         data.subjects.forEach(item => {
             const card = document.createElement("div");
-            card.className = "bg-[#111] hover:bg-[#222] transition-all duration-300 rounded-lg overflow-hidden flex flex-col transform hover:scale-105 shadow-md hover:shadow-lg";
+            card.className = "bg-[#151515] hover:bg-[#1a1a1a] transition-all duration-350 rounded-xl overflow-hidden flex flex-col transform hover:scale-105 shadow-[0_4px_12px_rgba(236,72,153,0.15)] hover:shadow-[0_8px_24px_rgba(236,72,153,0.25)] border border-[#252525] hover:border-[#333]";
             
             // 生成卡片内容，确保安全显示（防止XSS）
             const safeTitle = item.title
@@ -536,28 +552,60 @@ function renderDoubanCards(data, container) {
             const proxiedCoverUrl = PROXY_URL + encodeURIComponent(originalCoverUrl);
             
             // 为不同设备优化卡片布局
+            // 解析年份信息（从标题中提取）
+            const yearMatch = safeTitle.match(/\((\d{4})\)$/);
+            const year = yearMatch ? yearMatch[1] : '';
+            
+            // 去除标题中的年份
+            const cleanTitle = year ? safeTitle.replace(/\s*\(\d{4}\)$/, '') : safeTitle;
+            
             card.innerHTML = `
                 <div class="relative w-full aspect-[2/3] overflow-hidden cursor-pointer" onclick="fillAndSearchWithDouban('${safeTitle}')">
-                    <img src="${originalCoverUrl}" alt="${safeTitle}" 
-                        class="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
-                        onerror="this.onerror=null; this.src='${proxiedCoverUrl}'; this.classList.add('object-contain');"
-                        loading="lazy" referrerpolicy="no-referrer">
+                    <!-- 渐进式加载图片 -->
+                    <div class="relative w-full h-full">
+                        <!-- 低质量占位图 -->
+                        <img src="${originalCoverUrl}?imageMogr2/thumbnail/100x150" alt="${safeTitle}" 
+                            class="absolute inset-0 w-full h-full object-cover blur-sm"
+                            loading="lazy" referrerpolicy="no-referrer">
+                        <!-- 高质量图片 -->
+                        <img src="${originalCoverUrl}" alt="${safeTitle}" 
+                            class="absolute inset-0 w-full h-full object-cover transition-all duration-700 hover:scale-110 opacity-0"
+                            onerror="this.onerror=null; this.src='${proxiedCoverUrl}'; this.classList.add('object-contain');"
+                            loading="lazy" referrerpolicy="no-referrer"
+                            onload="this.classList.add('opacity-100');">
+                    </div>
                     <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
                     <div class="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm">
                         <span class="text-yellow-400">★</span> ${safeRate}
+                    </div>
+                    <div class="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm">
+                        ${year}
                     </div>
                     <div class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm hover:bg-[#333] transition-colors">
                         <a href="${item.url}" target="_blank" rel="noopener noreferrer" title="在豆瓣查看" onclick="event.stopPropagation();">
                             🔗
                         </a>
                     </div>
+                    
+                    <!-- 悬停显示的详细信息 -->
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3">
+                        <div class="text-sm font-medium text-white mb-1 line-clamp-2">${cleanTitle}</div>
+                        <div class="text-xs text-gray-300 mb-2">${year ? year + ' · ' : ''}${item.type === 'movie' ? '电影' : '电视剧'}</div>
+                        <div class="text-xs text-gray-300">
+                            <span class="text-yellow-400">★</span> ${safeRate} 评分
+                        </div>
+                    </div>
                 </div>
-                <div class="p-2 text-center bg-[#111]">
+                <div class="p-2 bg-[#151515]">
                     <button onclick="fillAndSearchWithDouban('${safeTitle}')" 
                             class="text-sm font-medium text-white truncate w-full hover:text-pink-400 transition"
                             title="${safeTitle}">
-                        ${safeTitle}
+                        ${cleanTitle}
                     </button>
+                    <div class="flex items-center justify-between text-xs text-gray-400">
+                        <span>${item.type === 'movie' ? '电影' : '电视剧'}</span>
+                        <span>${year ? year : ''}</span>
+                    </div>
                 </div>
             `;
             
