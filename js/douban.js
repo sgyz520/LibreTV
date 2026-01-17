@@ -432,8 +432,8 @@ function renderRecommend(tag, pageLimit, pageStart) {
     
     // 使用通用请求函数
     fetchDoubanData(target)
-        .then(data => {
-            renderDoubanCards(data, container);
+        .then(async data => {
+            await renderDoubanCards(data, container);
         })
         .catch(error => {
             console.error("获取豆瓣数据失败：", error);
@@ -510,7 +510,7 @@ async function fetchDoubanData(url) {
 }
 
 // 抽取渲染豆瓣卡片的逻辑到单独函数
-function renderDoubanCards(data, container) {
+async function renderDoubanCards(data, container) {
     // 创建文档片段以提高性能
     const fragment = document.createDocumentFragment();
     
@@ -530,7 +530,7 @@ function renderDoubanCards(data, container) {
             fragment.appendChild(emptyEl);
         } else {
         // 循环创建每个影视卡片
-        data.subjects.forEach(item => {
+        for (const item of data.subjects) {
             const card = document.createElement("div");
             card.className = "bg-[#151515] hover:bg-[#1a1a1a] transition-all duration-350 rounded-xl overflow-hidden flex flex-col transform hover:scale-105 shadow-[0_4px_12px_rgba(236,72,153,0.15)] hover:shadow-[0_8px_24px_rgba(236,72,153,0.25)] border border-[#252525] hover:border-[#333]";
             
@@ -548,8 +548,13 @@ function renderDoubanCards(data, container) {
             // 1. 直接使用豆瓣图片URL (添加no-referrer属性)
             const originalCoverUrl = item.cover;
             
-            // 2. 也准备代理URL作为备选
-            const proxiedCoverUrl = PROXY_URL + encodeURIComponent(originalCoverUrl);
+            // 2. 准备代理URL，并添加必要的鉴权参数
+            const proxyUrlWithoutAuth = PROXY_URL + encodeURIComponent(originalCoverUrl);
+            // 3. 使用ProxyAuth添加鉴权参数
+            const proxiedCoverUrl = await window.ProxyAuth.addAuthToProxyUrl(proxyUrlWithoutAuth).catch(error => {
+                console.error('为图片URL添加鉴权参数失败:', error);
+                return proxyUrlWithoutAuth;
+            });
             
             // 为不同设备优化卡片布局
             // 解析年份信息（从标题中提取）
@@ -608,7 +613,7 @@ function renderDoubanCards(data, container) {
             `;
             
             fragment.appendChild(card);
-        });
+        }
     }
     
     // 清空并添加所有新元素
