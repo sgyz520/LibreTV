@@ -561,16 +561,14 @@ function renderDoubanCards(data, container) {
             
             card.innerHTML = `
                 <div class="relative w-full aspect-[2/3] overflow-hidden cursor-pointer" onclick="fillAndSearchWithDouban('${safeTitle}')">
-                    <!-- 渐进式加载图片 -->
+                    <!-- 优化的图片加载策略，解决豆瓣防盗链问题 -->
                     <div class="relative w-full h-full">
-                        <!-- 低质量占位图 -->
-                        <img src="${originalCoverUrl}?imageMogr2/thumbnail/100x150" alt="${safeTitle}" 
-                            class="absolute inset-0 w-full h-full object-cover blur-sm"
-                            loading="lazy" referrerpolicy="no-referrer">
-                        <!-- 高质量图片 -->
-                        <img src="${originalCoverUrl}" alt="${safeTitle}" 
+                        <!-- 占位背景 -->
+                        <div class="absolute inset-0 bg-[#222] animate-pulse"></div>
+                        <!-- 直接使用代理URL加载图片 -->
+                        <img src="${proxiedCoverUrl}" alt="${safeTitle}" 
                             class="absolute inset-0 w-full h-full object-cover transition-all duration-700 hover:scale-110 opacity-0"
-                            onerror="this.onerror=null; this.src='${proxiedCoverUrl}'; this.classList.add('object-contain');"
+                            onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 300%22%3E%3Crect width=%22200%22 height=%22300%22 fill=%22%23333%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23666%22 font-size=%2214%22%3E暂无海报%3C/text%3E%3C/svg%3E'; this.classList.add('object-contain');"
                             loading="lazy" referrerpolicy="no-referrer"
                             onload="this.classList.add('opacity-100');">
                     </div>
