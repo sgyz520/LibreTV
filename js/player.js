@@ -91,6 +91,10 @@ let shortcutHintTimeout = null; // 用于控制快捷键提示显示时间
 let adFilteringEnabled = true; // 默认开启广告过滤
 let progressSaveInterval = null; // 定期保存进度的计时器
 let currentVideoUrl = ''; // 记录当前实际的视频URL
+// 预加载相关变量
+let nextEpisodePreloader = null; // 下一集预加载器实例
+let preloadEnabled = true; // 是否启用预加载
+let preloadProgress = {}; // 预加载进度跟踪
 const isWebkit = (typeof window.webkitConvertPointFromNodeToPage === 'function')
 Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
@@ -258,7 +262,14 @@ function initializePageContent() {
     document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'hidden') {
             saveCurrentProgress();
+            // 切后台时暂停所有预加载以节省带宽
+            videoPreloader.cancelAllPreloads();
         }
+    });
+    
+    // 页面卸载时清理所有预加载资源
+    window.addEventListener('unload', function () {
+        videoPreloader.cancelAllPreloads();
     });
 
     // 视频暂停时也保存
@@ -359,6 +370,135 @@ function handleKeyboardShortcuts(e) {
     }
 }
 
+// 视频预加载管理器
+class VideoPreloader {
+    constructor() {
+        this.preloadingVideos = new Map(); // 正在预加载的视频
+        this.maxPreloadSize = 50 * 1024 * 1024; // 每个视频最大预加载50MB
+        this.maxConcurrentPreloads = 1; // 最大并发预加载数
+    }
+
+    // 预加载视频
+    async preloadVideo(videoUrl, videoId) {
+        if (!videoUrl || this.preloadingVideos.has(videoId)) {
+            return;
+        }
+
+        // 如果已达到最大并发数，等待
+        while (this.preloadingVideos.size >= this.maxConcurrentPreloads) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        try {
+            this.preloadingVideos.set(videoId, { url: videoUrl, progress: 0, loaded: 0, total: 0 });
+            
+            // 预加载HLS manifest
+            const manifestResponse = await fetch(videoUrl, {
+                method: 'GET',
+                headers: {
+                    'Range': 'bytes=0-1023' // 只获取文件头
+                },
+                signal: AbortSignal.timeout(5000)
+            });
+
+            if (!manifestResponse.ok) {
+                throw new Error('Manifest fetch failed');
+            }
+
+            const manifestText = await manifestResponse.text();
+            const preloadProgress = this.preloadingVideos.get(videoId);
+            preloadProgress.progress = 10; // Manifest loaded
+            
+            // 提取关键片段URLs进行预加载
+            const segmentUrls = this.extractKeySegments(manifestText, videoUrl);
+            if (segmentUrls.length === 0) {
+                this.preloadingVideos.delete(videoId);
+                return;
+            }
+
+            preloadProgress.total = segmentUrls.length;
+            
+            // 预加载前几个关键片段
+            const segmentsToPreload = Math.min(segmentUrls.length, 10); // 预加载前10个片段
+            for (let i = 0; i < segmentsToPreload; i++) {
+                if (!this.preloadingVideos.has(videoId)) {
+                    break; // 预加载已取消
+                }
+
+                try {
+                    const segmentResponse = await fetch(segmentUrls[i], {
+                        method: 'GET',
+                        signal: AbortSignal.timeout(10000)
+                    });
+
+                    if (segmentResponse.ok) {
+                        const segmentSize = parseInt(segmentResponse.headers.get('content-length') || '0');
+                        preloadProgress.loaded++;
+                        preloadProgress.progress = Math.min(10 + Math.floor((preloadProgress.loaded / segmentsToPreload) * 80), 90);
+                        
+                        // 读取内容到内存以确保缓存
+                        await segmentResponse.arrayBuffer();
+                        
+                        // 更新预加载进度
+                        preloadProgress.preloaded = (preloadProgress.preloaded || 0) + segmentSize;
+                        if (preloadProgress.preloaded >= this.maxPreloadSize) {
+                            break; // 已达到最大预加载大小
+                        }
+                    }
+                } catch (segmentError) {
+                    // 忽略单个片段加载错误，继续预加载其他片段
+                    console.warn(`Preload segment failed: ${segmentError.message}`);
+                }
+            }
+
+            preloadProgress.progress = 100; // 预加载完成
+        } catch (error) {
+            console.warn(`Video preload failed: ${error.message}`);
+        } finally {
+            // 预加载完成或失败，移除记录
+            setTimeout(() => {
+                this.preloadingVideos.delete(videoId);
+            }, 300000); // 5分钟后清理缓存记录
+        }
+    }
+
+    // 提取HLS关键片段URL
+    extractKeySegments(manifestText, baseUrl) {
+        const lines = manifestText.split('\n');
+        const segmentUrls = [];
+        let basePath = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.endsWith('.ts') || line.endsWith('.m3u8')) {
+                // 构建完整URL
+                const fullUrl = line.startsWith('http') ? line : basePath + line;
+                segmentUrls.push(fullUrl);
+            }
+        }
+        
+        return segmentUrls;
+    }
+
+    // 取消特定视频的预加载
+    cancelPreload(videoId) {
+        this.preloadingVideos.delete(videoId);
+    }
+
+    // 取消所有预加载
+    cancelAllPreloads() {
+        this.preloadingVideos.clear();
+    }
+
+    // 获取预加载进度
+    getPreloadProgress(videoId) {
+        return this.preloadingVideos.get(videoId)?.progress || 0;
+    }
+}
+
+// 创建预加载器实例
+const videoPreloader = new VideoPreloader();
+
 // 显示快捷键提示
 function showShortcutHint(text, direction) {
     const hintElement = document.getElementById('shortcutHint');
@@ -408,33 +548,39 @@ function initPlayer(videoUrl) {
         art = null;
     }
 
-    // 配置HLS.js选项
+    // 配置HLS.js选项 - 优化版本
     const hlsConfig = {
         debug: false,
         loader: adFilteringEnabled ? CustomHlsJsLoader : Hls.DefaultConfig.loader,
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 90,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        maxBufferSize: 30 * 1000 * 1000,
-        maxBufferHole: 0.5,
-        fragLoadingMaxRetry: 6,
+        backBufferLength: 120, // 增加缓冲时长到120秒
+        maxBufferLength: 45,   // 增加最大缓冲长度到45秒
+        maxMaxBufferLength: 90, // 增加最大总缓冲长度到90秒
+        maxBufferSize: 45 * 1000 * 1000, // 增加最大缓冲大小
+        maxBufferHole: 0.2,     // 减小缓冲空洞阈值，提前触发填充
+        fragLoadingMaxRetry: 8,  // 增加重试次数
         fragLoadingMaxRetryTimeout: 64000,
         fragLoadingRetryDelay: 1000,
         manifestLoadingMaxRetry: 3,
         manifestLoadingRetryDelay: 1000,
         levelLoadingMaxRetry: 4,
         levelLoadingRetryDelay: 1000,
-        startLevel: -1,
-        abrEwmaDefaultEstimate: 500000,
-        abrBandWidthFactor: 0.95,
-        abrBandWidthUpFactor: 0.7,
+        startLevel: -1,        // 自动选择最佳质量
+        abrEwmaDefaultEstimate: 300000, // 降低默认带宽估计，更敏感
+        abrBandWidthFactor: 0.9,        // 降低带宽因子，更快切换到高质量
+        abrBandWidthUpFactor: 0.6,      // 降低上行带宽因子，更快适应带宽增加
         abrMaxWithRealBitrate: true,
         stretchShortVideoTrack: true,
-        appendErrorMaxRetry: 5,  // 增加尝试次数
+        appendErrorMaxRetry: 8,          // 增加错误重试次数
         liveSyncDurationCount: 3,
-        liveDurationInfinity: false
+        liveDurationInfinity: false,
+        // 添加预加载优化
+        enableAutoLevelGroup: true,      // 启用自动质量组
+        autoLevelEnabled: true,          // 自动质量选择
+        // 优化片段加载策略
+        fragLoadingFastStart: true,      // 快速开始片段加载
+        maxFragLookUpTolerance: 0.25    // 降低查找容差，更精确加载
     };
 
     // Create new ArtPlayer instance
@@ -738,6 +884,32 @@ function initPlayer(videoUrl) {
                 art.play();
             });
         }
+        
+        // 视频开始播放后预加载下一集
+        if (preloadEnabled && currentEpisodes.length > 0 && currentEpisodeIndex < currentEpisodes.length - 1) {
+            const nextEpisodeIndex = currentEpisodeIndex + 1;
+            const nextEpisodeUrl = currentEpisodes[nextEpisodeIndex];
+            if (nextEpisodeUrl) {
+                const nextEpisodeId = `episode_${nextEpisodeIndex}_${currentVideoTitle}`;
+                videoPreloader.preloadVideo(nextEpisodeUrl, nextEpisodeId);
+            }
+        }
+    });
+    
+    // 视频结束时预加载下一集（如果自动播放开启）
+    art.on('video:ended', () => {
+        // 自动播放时，预加载下一集已经完成，这里主要处理手动播放的情况
+        if (preloadEnabled && autoplayEnabled && currentEpisodeIndex < currentEpisodes.length - 1) {
+            const nextEpisodeIndex = currentEpisodeIndex + 1;
+            if (nextEpisodeIndex < currentEpisodes.length - 1) {
+                // 如果下一集不是最后一集，预加载下下集
+                const nextNextEpisodeUrl = currentEpisodes[nextEpisodeIndex + 1];
+                if (nextNextEpisodeUrl) {
+                    const nextNextEpisodeId = `episode_${nextEpisodeIndex + 1}_${currentVideoTitle}`;
+                    videoPreloader.preloadVideo(nextNextEpisodeUrl, nextNextEpisodeId);
+                }
+            }
+        }
     });
 
     // 10秒后如果仍在加载，但不立即显示错误
@@ -902,6 +1074,13 @@ function playEpisode(index) {
         progressSaveInterval = null;
     }
 
+    // 取消所有相关的预加载任务
+    const oldEpisodeIds = [];
+    for (let i = 0; i < currentEpisodes.length; i++) {
+        oldEpisodeIds.push(`episode_${i}_${currentVideoTitle}`);
+    }
+    oldEpisodeIds.forEach(id => videoPreloader.cancelPreload(id));
+
     // 首先隐藏之前可能显示的错误
     document.getElementById('error').style.display = 'none';
     // 显示加载指示器
@@ -936,6 +1115,15 @@ function playEpisode(index) {
         initPlayer(url);
     } else {
         art.switch = url;
+    }
+    
+    // 立即预加载下一集
+    if (preloadEnabled && index < currentEpisodes.length - 1) {
+        const nextEpisodeUrl = currentEpisodes[index + 1];
+        if (nextEpisodeUrl) {
+            const nextEpisodeId = `episode_${index + 1}_${currentVideoTitle}`;
+            videoPreloader.preloadVideo(nextEpisodeUrl, nextEpisodeId);
+        }
     }
 
     // 更新UI
