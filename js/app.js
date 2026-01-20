@@ -59,6 +59,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // 初始检查成人API选中状态
     setTimeout(checkAdultAPIsSelected, 100);
+    
+    // 初始化优选源UI
+    if (typeof initSourcePreferUI === 'function') {
+        initSourcePreferUI();
+    }
 });
 
 // 初始化API复选框
@@ -656,15 +661,20 @@ async function search() {
             }
         });
 
-        // 对搜索结果进行排序：按名称优先，名称相同时按接口源排序
-        allResults.sort((a, b) => {
-            // 首先按照视频名称排序
-            const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
-            if (nameCompare !== 0) return nameCompare;
-            
-            // 如果名称相同，则按照来源排序
-            return (a.source_name || '').localeCompare(b.source_name || '');
-        });
+        // 应用优选播放源策略
+        if (typeof applySourcePreferInSearch === 'function') {
+            allResults = applySourcePreferInSearch(allResults, query);
+        } else {
+            // 对搜索结果进行排序：按名称优先，名称相同时按接口源排序
+            allResults.sort((a, b) => {
+                // 首先按照视频名称排序
+                const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
+                if (nameCompare !== 0) return nameCompare;
+                
+                // 如果名称相同，则按照来源排序
+                return (a.source_name || '').localeCompare(b.source_name || '');
+            });
+        }
 
         // 更新搜索结果计数
         const searchResultsCount = document.getElementById('searchResultsCount');
@@ -1251,106 +1261,239 @@ async function importConfigFromUrl() {
 
 // 配置文件导入功能
 async function importConfig() {
-    showImportBox(async (file) => {
-        try {
-            // 检查文件类型
-            if (!(file.type === 'application/json' || file.name.endsWith('.json'))) throw '文件类型不正确';
+  showImportBox(async (file) => {
+    try {
+      // 检查文件类型
+      if (!(file.type === 'application/json' || file.name.endsWith('.json'))) throw '文件类型不正确';
 
-            // 检查文件大小
-            if (file.size > 1024 * 1024 * 10) throw new Error('文件大小超过 10MB');
+      // 检查文件大小
+      if (file.size > 1024 * 1024 * 10) throw new Error('文件大小超过 10MB');
 
-            // 读取文件内容
-            const content = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => reject('文件读取失败');
-                reader.readAsText(file);
-            });
+      // 读取文件内容
+      const content = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject('文件读取失败');
+        reader.readAsText(file);
+      });
 
-            // 解析并验证配置
-            const config = JSON.parse(content);
-            if (config.name !== 'LibreTV-Settings') throw '配置文件格式不正确';
+      // 解析并验证配置
+      const config = JSON.parse(content);
+      if (config.name !== 'LibreTV-Settings') throw '配置文件格式不正确';
 
-            // 验证哈希
-            const dataHash = await sha256(JSON.stringify(config.data));
-            if (dataHash !== config.hash) throw '配置文件哈希值不匹配';
+      // 验证哈希
+      const dataHash = await sha256(JSON.stringify(config.data));
+      if (dataHash !== config.hash) throw '配置文件哈希值不匹配';
 
-            // 导入配置
-            for (let item in config.data) {
-                localStorage.setItem(item, config.data[item]);
-            }
+      // 导入配置
+      for (let item in config.data) {
+        localStorage.setItem(item, config.data[item]);
+      }
 
-            showToast('配置文件导入成功，3 秒后自动刷新本页面。', 'success');
-            setTimeout(() => {
-                window.location.reload();
-            }, 3000);
-        } catch (error) {
-            const message = typeof error === 'string' ? error : '配置文件格式错误';
-            showToast(`配置文件读取出错 (${message})`, 'error');
-        }
-    });
+      showToast('配置文件导入成功，3 秒后自动刷新本页面。', 'success');
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
+    } catch (error) {
+      const message = typeof error === 'string' ? error : '配置文件格式错误';
+      showToast(`配置文件读取出错 (${message})`, 'error');
+    }
+  });
 }
 
 // 配置文件导出功能
 async function exportConfig() {
-    // 存储配置数据
-    const config = {};
-    const items = {};
+  // 存储配置数据
+  const config = {};
+  const items = {};
 
-    const settingsToExport = [
-        'selectedAPIs',
-        'customAPIs',
-        'yellowFilterEnabled',
-        'adFilteringEnabled',
-        'doubanEnabled',
-        'hasInitializedDefaults'
-    ];
+  const settingsToExport = [
+    'selectedAPIs',
+    'customAPIs',
+    'yellowFilterEnabled',
+    'adFilteringEnabled',
+    'doubanEnabled',
+    'hasInitializedDefaults'
+  ];
 
-    // 导出设置项
-    settingsToExport.forEach(key => {
-        const value = localStorage.getItem(key);
-        if (value !== null) {
-            items[key] = value;
-        }
-    });
-
-    // 导出历史记录
-    const viewingHistory = localStorage.getItem('viewingHistory');
-    if (viewingHistory) {
-        items['viewingHistory'] = viewingHistory;
+  // 导出设置项
+  settingsToExport.forEach(key => {
+    const value = localStorage.getItem(key);
+    if (value !== null) {
+      items[key] = value;
     }
+  });
 
-    const searchHistory = localStorage.getItem(SEARCH_HISTORY_KEY);
-    if (searchHistory) {
-        items[SEARCH_HISTORY_KEY] = searchHistory;
-    }
+  // 导出历史记录
+  const viewingHistory = localStorage.getItem('viewingHistory');
+  if (viewingHistory) {
+    items['viewingHistory'] = viewingHistory;
+  }
 
-    const times = Date.now().toString();
-    config['name'] = 'LibreTV-Settings';  // 配置文件名，用于校验
-    config['time'] = times;               // 配置文件生成时间
-    config['cfgVer'] = '1.0.0';           // 配置文件版本
-    config['data'] = items;               // 配置文件数据
-    config['hash'] = await sha256(JSON.stringify(config['data']));  // 计算数据的哈希值，用于校验
+  const searchHistory = localStorage.getItem(SEARCH_HISTORY_KEY);
+  if (searchHistory) {
+    items[SEARCH_HISTORY_KEY] = searchHistory;
+  }
 
-    // 将配置数据保存为 JSON 文件
-    saveStringAsFile(JSON.stringify(config), 'LibreTV-Settings_' + times + '.json');
+  const times = Date.now().toString();
+  config['name'] = 'LibreTV-Settings';  // 配置文件名，用于校验
+  config['time'] = times;               // 配置文件生成时间
+  config['cfgVer'] = '1.0.0';           // 配置文件版本
+  config['data'] = items;               // 配置文件数据
+  config['hash'] = await sha256(JSON.stringify(config['data']));  // 计算数据的哈希值，用于校验
+
+  // 将配置数据保存为 JSON 文件
+  saveStringAsFile(JSON.stringify(config), 'LibreTV-Settings_' + times + '.json');
 }
 
 // 将字符串保存为文件
 function saveStringAsFile(content, fileName) {
-    // 创建Blob对象并指定类型
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    // 生成临时URL
-    const url = window.URL.createObjectURL(blob);
-    // 创建<a>标签并触发下载
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    // 清理临时对象
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
+  // 创建Blob对象并指定类型
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  // 生成临时URL
+  const url = window.URL.createObjectURL(blob);
+  // 创建<a>标签并触发下载
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  // 清理临时对象
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
 }
+
+// AI 聊天功能
+
+// 切换 AI 聊天对话框显示/隐藏
+function toggleAIChat() {
+  const modal = document.getElementById('aiChatModal');
+  modal.classList.toggle('hidden');
+  
+  // 如果打开对话框，自动聚焦到输入框
+  if (!modal.classList.contains('hidden')) {
+    setTimeout(() => {
+      document.getElementById('aiChatInput').focus();
+    }, 100);
+  }
+}
+
+// 发送 AI 聊天消息
+async function sendAIChatMessage() {
+  const input = document.getElementById('aiChatInput');
+  const message = input.value.trim();
+  
+  if (!message) return;
+  
+  // 清空输入框
+  input.value = '';
+  
+  // 显示用户消息
+  const messagesContainer = document.getElementById('aiChatMessages');
+  const userMessageElement = createMessageElement(message, 'user');
+  messagesContainer.appendChild(userMessageElement);
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  
+  // 显示正在输入状态
+  const typingElement = createTypingElement();
+  messagesContainer.appendChild(typingElement);
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  
+  try {
+    // 调用 AI 聊天 API
+    const response = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ message })
+    });
+    
+    const result = await response.json();
+    
+    // 移除正在输入状态
+    messagesContainer.removeChild(typingElement);
+    
+    // 显示 AI 响应
+    const aiMessageElement = createMessageElement(result.text, 'ai');
+    messagesContainer.appendChild(aiMessageElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  } catch (error) {
+    // 移除正在输入状态
+    messagesContainer.removeChild(typingElement);
+    
+    // 显示错误消息
+    const errorMessageElement = createMessageElement('抱歉，AI 服务暂时不可用，请稍后重试。', 'ai');
+    messagesContainer.appendChild(errorMessageElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    console.error('AI 聊天请求失败:', error);
+  }
+}
+
+// 创建消息元素
+function createMessageElement(content, role) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `flex items-start ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+  
+  if (role === 'user') {
+    messageDiv.innerHTML = `
+      <div class="bg-purple-600 rounded-lg p-3 max-w-[80%] mr-3">
+        <p class="text-white">${content}</p>
+      </div>
+      <div class="flex-shrink-0 w-10 h-10 bg-[#333] rounded-full flex items-center justify-center">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+        </svg>
+      </div>
+    `;
+  } else {
+    messageDiv.innerHTML = `
+      <div class="flex-shrink-0 w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center mr-3">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+        </svg>
+      </div>
+      <div class="bg-[#222] rounded-lg p-3 max-w-[80%]">
+        <p class="text-white">${content}</p>
+      </div>
+    `;
+  }
+  
+  return messageDiv;
+}
+
+// 创建正在输入元素
+function createTypingElement() {
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'flex items-start justify-start';
+  typingDiv.innerHTML = `
+    <div class="flex-shrink-0 w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center mr-3">
+      <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+      </svg>
+    </div>
+    <div class="bg-[#222] rounded-lg p-3 max-w-[80%]">
+      <div class="flex space-x-2">
+        <div class="w-3 h-3 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0ms;"></div>
+        <div class="w-3 h-3 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms;"></div>
+        <div class="w-3 h-3 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms;"></div>
+      </div>
+    </div>
+  `;
+  
+  return typingDiv;
+}
+
+// 添加键盘事件监听（回车键发送消息）
+document.addEventListener('DOMContentLoaded', function() {
+  const aiChatInput = document.getElementById('aiChatInput');
+  if (aiChatInput) {
+    aiChatInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        sendAIChatMessage();
+      }
+    });
+  }
+});
 
 // 移除Node.js的require语句，因为这是在浏览器环境中运行的

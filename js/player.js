@@ -1416,6 +1416,262 @@ function toggleControlsLock() {
         : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d=\"M15 11V7a3 3 0 00-6 0v4m-3 4h12v6H6v-6z\"/>';
 }
 
+// =====================================================================
+// =================== ANIME4K VIDEO UPSCALING =====================
+// =====================================================================
+
+// Anime4K超分相关状态
+let anime4kEnabled = false;
+let anime4kMode = 'ModeA';
+let anime4kScale = 2.0;
+let webGPUSupported = false;
+let anime4kRef = null;
+let anime4kSettingsVisible = false;
+
+// 检测WebGPU支持
+function checkWebGPUSupport() {
+    if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
+        navigator.gpu.requestAdapter().then(adapter => {
+            webGPUSupported = adapter !== null;
+            if (!webGPUSupported) {
+                console.log('WebGPU不支持，无法使用Anime4K超分');
+            }
+        });
+    }
+}
+
+// 初始化Anime4K状态
+function initAnime4KState() {
+    checkWebGPUSupport();
+    
+    // 从localStorage读取保存的状态
+    anime4kEnabled = localStorage.getItem('enable_anime4k') === 'true';
+    anime4kMode = localStorage.getItem('anime4k_mode') || 'ModeA';
+    anime4kScale = parseFloat(localStorage.getItem('anime4k_scale') || '2.0');
+    
+    // 更新超分按钮状态
+    updateAnime4KButton();
+}
+
+// 初始化Anime4K
+async function initAnime4K() {
+    if (!webGPUSupported || !art || !art.video || anime4kRef) {
+        return;
+    }
+    
+    try {
+        // 动态导入anime4k-webgpu库
+        const { render: anime4kRender, ModeA, ModeB, ModeC, ModeAA, ModeBB, ModeCA } = await import('https://cdn.jsdelivr.net/npm/anime4k-webgpu@latest/dist/anime4k-webgpu.js');
+        
+        // 创建渲染配置
+        const modeMap = {
+            'ModeA': ModeA,
+            'ModeB': ModeB,
+            'ModeC': ModeC,
+            'ModeAA': ModeAA,
+            'ModeBB': ModeBB,
+            'ModeCA': ModeCA
+        };
+        
+        const selectedMode = modeMap[anime4kMode] || ModeA;
+        const scale = anime4kScale;
+        
+        // 获取视频元素和播放器容器
+        const videoElement = art.video;
+        const playerContainer = document.getElementById('player');
+        
+        if (!videoElement || !playerContainer) {
+            console.error('无法获取视频元素或播放器容器');
+            return;
+        }
+        
+        // 创建canvas元素
+        const canvas = document.createElement('canvas');
+        canvas.style.position = 'absolute';
+        canvas.style.top = '0';
+        canvas.style.left = '0';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.pointerEvents = 'none';
+        canvas.style.zIndex = '10';
+        
+        // 将canvas添加到播放器容器
+        playerContainer.appendChild(canvas);
+        
+        // 创建渲染配置
+        const renderConfig = {
+            input: videoElement,
+            output: canvas,
+            mode: selectedMode,
+            scale: scale,
+        };
+        
+        // 初始化渲染器
+        const controller = await anime4kRender(renderConfig);
+        
+        // 保存引用
+        anime4kRef = {
+            controller: controller,
+            canvas: canvas,
+            enabled: true
+        };
+        
+        console.log('Anime4K超分已启用，模式:', anime4kMode, '倍数:', scale);
+        showToast('视频超分已启用', 'success');
+        
+    } catch (error) {
+        console.error('初始化Anime4K失败:', error);
+        showToast('视频超分初始化失败', 'error');
+    }
+}
+
+// 清理Anime4K
+async function cleanupAnime4K() {
+    if (anime4kRef) {
+        try {
+            if (anime4kRef.controller?.stop) {
+                await anime4kRef.controller.stop();
+            }
+            
+            if (anime4kRef.canvas && anime4kRef.canvas.parentNode) {
+                anime4kRef.canvas.parentNode.removeChild(anime4kRef.canvas);
+            }
+            
+            anime4kRef = null;
+            console.log('Anime4K已清理');
+        } catch (error) {
+            console.error('清理Anime4K时出错:', error);
+        }
+    }
+}
+
+// 切换Anime4K启用状态
+async function toggleAnime4K() {
+    if (!webGPUSupported) {
+        showToast('WebGPU不支持，无法使用视频超分', 'warning');
+        return;
+    }
+    
+    anime4kEnabled = !anime4kEnabled;
+    localStorage.setItem('enable_anime4k', String(anime4kEnabled));
+    
+    if (anime4kEnabled) {
+        await initAnime4K();
+    } else {
+        await cleanupAnime4K();
+        showToast('视频超分已禁用', 'info');
+    }
+    
+    updateAnime4KButton();
+}
+
+// 切换Anime4K设置面板显示
+function toggleAnime4KSettings() {
+    anime4kSettingsVisible = !anime4kSettingsVisible;
+    const settingsPanel = document.getElementById('anime4kSettings');
+    settingsPanel.classList.toggle('hidden', !anime4kSettingsVisible);
+}
+
+// 更改Anime4K模式
+async function changeAnime4KMode(mode) {
+    anime4kMode = mode;
+    localStorage.setItem('anime4k_mode', mode);
+    
+    // 更新按钮样式
+    document.querySelectorAll('#anime4kSettings button').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+        btn.classList.add('bg-[#333]', 'hover:bg-[#444]');
+    });
+    event.target.classList.remove('bg-[#333]', 'hover:bg-[#444]');
+    event.target.classList.add('bg-blue-600', 'hover:bg-blue-700');
+    
+    // 如果已启用超分，重新初始化
+    if (anime4kEnabled) {
+        await cleanupAnime4K();
+        await initAnime4K();
+    }
+}
+
+// 更改Anime4K缩放倍数
+async function changeAnime4KScale(scale) {
+    anime4kScale = scale;
+    localStorage.setItem('anime4k_scale', scale.toString());
+    
+    // 更新按钮样式
+    document.querySelectorAll('#anime4kSettings button').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+        btn.classList.add('bg-[#333]', 'hover:bg-[#444]');
+    });
+    event.target.classList.remove('bg-[#333]', 'hover:bg-[#444]');
+    event.target.classList.add('bg-blue-600', 'hover:bg-blue-700');
+    
+    // 如果已启用超分，重新初始化
+    if (anime4kEnabled) {
+        await cleanupAnime4K();
+        await initAnime4K();
+    }
+}
+
+// 更新超分按钮状态
+function updateAnime4KButton() {
+    const button = document.getElementById('anime4kToggle');
+    if (button) {
+        if (anime4kEnabled) {
+            button.classList.remove('bg-[#222]', 'hover:bg-[#333]');
+            button.classList.add('bg-purple-600', 'hover:bg-purple-700');
+        } else {
+            button.classList.remove('bg-purple-600', 'hover:bg-purple-700');
+            button.classList.add('bg-[#222]', 'hover:bg-[#333]');
+        }
+    }
+}
+
+// 添加超分按钮点击事件监听器
+function setupAnime4KEventListeners() {
+    const button = document.getElementById('anime4kToggle');
+    if (button) {
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleAnime4K();
+        });
+        
+        // 添加点击外部关闭设置面板的事件
+        document.addEventListener('click', (e) => {
+            const settingsPanel = document.getElementById('anime4kSettings');
+            if (anime4kSettingsVisible && settingsPanel && !settingsPanel.contains(e.target) && e.target !== button) {
+                anime4kSettingsVisible = false;
+                settingsPanel.classList.add('hidden');
+            }
+        });
+        
+        // 添加长按显示设置面板的事件
+        let longPressTimer;
+        button.addEventListener('mousedown', (e) => {
+            longPressTimer = setTimeout(() => {
+                toggleAnime4KSettings();
+            }, 500);
+        });
+        
+        button.addEventListener('mouseup', () => {
+            clearTimeout(longPressTimer);
+        });
+        
+        button.addEventListener('mouseleave', () => {
+            clearTimeout(longPressTimer);
+        });
+    }
+}
+
+// 页面加载时初始化Anime4K
+checkWebGPUSupport();
+initAnime4KState();
+setupAnime4KEventListeners();
+
+// 在播放器初始化后尝试初始化Anime4K
+if (art && art.video) {
+    initAnime4K();
+}
+
 // 支持在iframe中关闭播放器
 function closeEmbeddedPlayer() {
     try {

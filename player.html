@@ -126,6 +126,15 @@
                         <span id="orderText">倒序排列</span>
                     </button>
                     
+                    <!-- 视频超分按钮 -->
+                    <button id="anime4kToggle" onclick="toggleAnime4K()" title="视频超分" 
+                            class="px-3 py-1 bg-[#222] hover:bg-[#333] border border-[#333] rounded-lg transition-colors flex items-center space-x-1 flex-shrink-0">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                        </svg>
+                        <span>视频超分</span>
+                    </button>
+                    
                     <!-- 复制链接按钮 -->
                     <button title="复制播放链接" onclick="copyLinks()" class="px-2 py-1 bg-[#222] hover:bg-[#333] border border-[#333] text-white rounded-lg transition">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -142,6 +151,36 @@
                                 d="M15 11V7a3 3 0 00-6 0v4m-3 4h12v6H6v-6z" />
                         </svg>
                     </button>
+                </div>
+                
+                <!-- 视频超分设置面板 -->
+                <div id="anime4kSettings" class="mt-2 bg-[#222] p-4 rounded-lg hidden">
+                    <h4 class="text-sm font-medium text-gray-300 mb-3">视频超分设置</h4>
+                    <div class="space-y-3">
+                        <!-- 超分模式 -->
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">超分模式</label>
+                            <div class="flex flex-wrap gap-2">
+                                <button onclick="changeAnime4KMode('ModeA')" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">ModeA</button>
+                                <button onclick="changeAnime4KMode('ModeB')" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">ModeB</button>
+                                <button onclick="changeAnime4KMode('ModeC')" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">ModeC</button>
+                                <button onclick="changeAnime4KMode('ModeAA')" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">ModeAA</button>
+                                <button onclick="changeAnime4KMode('ModeBB')" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">ModeBB</button>
+                                <button onclick="changeAnime4KMode('ModeCA')" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">ModeCA</button>
+                            </div>
+                        </div>
+                        
+                        <!-- 超分倍数 -->
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">超分倍数</label>
+                            <div class="flex flex-wrap gap-2">
+                                <button onclick="changeAnime4KScale(1.5)" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">1.5x</button>
+                                <button onclick="changeAnime4KScale(2.0)" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">2.0x</button>
+                                <button onclick="changeAnime4KScale(3.0)" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">3.0x</button>
+                                <button onclick="changeAnime4KScale(4.0)" class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-xs transition-colors">4.0x</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
